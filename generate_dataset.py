@@ -54,6 +54,7 @@ class dataset(object):
         self.bands = bands
         self.spatial_res = spatial_res
         self.surface_rho = None
+        self.modelled_fire = False
 
     def make_stack(self):
         self.surface_rho = np.ones((self.timesteps, self.bands, self.xSize, self.ySize))
@@ -74,7 +75,9 @@ class dataset(object):
         run after fires has been modelled into scene...
 
         """
-        pass
+        if self.modelled_fire:
+            # fire has been added
+            # hmmm how to do this?
 
     def model_fires(self):
         """
