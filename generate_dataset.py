@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 """
 
 TODO:
@@ -19,7 +20,7 @@ python generate_test_data.py
 
 # for each location need to add the fire in
 #now need
-import noise
+#import noise
 from scipy.signal import convolve
 import scipy.interpolate
 import sys
@@ -44,13 +45,20 @@ class experiment(params):
     """
     pass
 
+
 class dataset(object):
-    def __init__(self, outname, sizex, sizey, spatial_res=1 ):
+    def __init__(self, outname='nothing.tif',timesteps=100, bands=13, sizex=100, sizey=100, spatial_res=1 ):
         self.xSize = sizex
         self.ySize = sizey
+        self.timesteps = timesteps
+        self.bands = bands
         self.spatial_res = spatial_res
+        self.surface_rho = None
 
-    def model_brdf_effects(vza, sza):
+    def make_stack(self):
+        self.surface_rho = np.zeros((self.timesteps, self.bands, self.xSize, self.ySize))
+
+    def model_brdf_effects(self, vza, sza):
         """
         Add BRDF effects by simulating the kernels over the image
 
@@ -59,15 +67,46 @@ class dataset(object):
         """
         pass
 
-    def model_cloud_cover():
+    def model_cloud_cover(self):
         """
         Add clouds to remove some pixels
 
         """
         pass
 
-    def model_fires():
-        
+    def model_fires(self):
+        """
+
+        """
+        if self.surface_rho == None:
+            self.make_stack()
+        # load spectra    
+        vegetation_rho, ash_rho = generate_spectra()
+        # select some bands...
+        vegetation_rho = vegetation_rho[::25]
+        ash_rho = ash_rho[::25]
+
+        # first fill the dataset with just normal leaf reflectance across all timesteps
+        self.surface_rho = (self.surface_rho[:].T*vegetation_rho[None, :].T).T
+
+        # ADD NOISE
+        # created spatio-temporal noise patterns
+        #noises = make_noises(timesteps,bands,size)
+
+        # scale down from (-1,1) to a smaller range ...
+        #noises *= 0.1
+
+        # now add to the surface reflectance
+        #self.surface_rho += noises
+
+        # now generate some fires
+        self.fires = burnIt_idea1(self)
+        self.fire_locs = np.where(self.fires)
+        import pdb; pdb.set_trace()
+        # Now run mixture model for spectral response to fire
+        dob = 10
+        self.surface_rho = spectral_fire_model(self.surface_rho, dob, self.timesteps,
+                                                self.fire_locs, ash_rho)
 
 
 ####################################
@@ -102,7 +141,7 @@ def generate_spectra():
     return veg_refl, soil_ash_char2
 
 
-# seems to only work in a loop atm!!!
+#seems to only work in a loop atm!!!
 # do same noise across bands but varying in space and time -- use 3d noise for now
 
 def make_noises(timesteps, bands, size):
@@ -158,7 +197,7 @@ class aFire():
             return None
 
 
-def burnIt_idea1(surface, size=100, DOB=10, num_seeds=10, temporal=True):
+def burnIt_idea1(dataset, seeds=10, temporal=True):
     """
     Generate burned areas that occur around the date of burn choosen
     easy way is to create a 3d boolean mask where only TRUE are where
@@ -169,8 +208,8 @@ def burnIt_idea1(surface, size=100, DOB=10, num_seeds=10, temporal=True):
     to produce burned areas...
     --- also has a temporal flag so that the burn spreads in time..
     """
-    size=100
-    seeds = 10
+    size=dataset.xSize
+    timesteps = dataset.timesteps
     DOB = 10
     burns = []
     for i in xrange(seeds):
@@ -209,7 +248,7 @@ def spectral_temporal_response(num_days=20):
     return vegetation, char_ash
 
 
-def spectral_fire_model(surface_refl, fires_locations, ash_spectrum):
+def spectral_fire_model(surface_refl, dob, timesteps, fires_locations, ash_spectrum):
     for i in xrange(len(fires_locations[0])):
         #
         dob = int(fires_locations[0][i])
@@ -224,39 +263,10 @@ def spectral_fire_model(surface_refl, fires_locations, ash_spectrum):
     return surface_refl
 
 
-
 def main():
-    vegetation_rho, ash_rho = generate_spectra()
-    # select some bands...
-    vegetation_rho = vegetation_rho[::25]
-    ash_rho = ash_rho[::25]
+    ds = dataset()
+    ds.model_fires()
+    import pdb; pdb.set_trace()
 
-    # generate empty dataset
-    bands = 13
-    timesteps = 100
-    size=100
-    data = np.ones((timesteps, bands, size,size))
-
-
-    # first fill the dataset with just normal leaf reflectance across all timesteps
-    surface_refl = (data[:].T*vegetation_rho[None, :].T).T
-
-    # ADD NOISE
-    # created spatio-temporal noise patterns
-    noises = make_noises(timesteps,bands,size)
-
-    # scale down from (-1,1) to a smaller range ...
-    noises *= 0.1
-
-    # now add to the surface reflectance
-    surface_refl += noises
-
-    # now generate some fires
-    fires = burnIt_idea1(surface_refl, size=size, DOB=20)
-
-    # Now run mixture model for spectral response to fire
-    surface_refl = spectral_fire_model(surface_refl, fires, ash_rho)
-    return surface_refl
-
-# run main..
-main()
+if __name__ == "__main__":
+    main()    
