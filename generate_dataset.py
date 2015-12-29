@@ -56,7 +56,7 @@ class dataset(object):
         self.surface_rho = None
 
     def make_stack(self):
-        self.surface_rho = np.zeros((self.timesteps, self.bands, self.xSize, self.ySize))
+        self.surface_rho = np.ones((self.timesteps, self.bands, self.xSize, self.ySize))
 
     def model_brdf_effects(self, vza, sza):
         """
@@ -70,6 +70,8 @@ class dataset(object):
     def model_cloud_cover(self):
         """
         Add clouds to remove some pixels
+
+        run after fires has been modelled into scene...
 
         """
         pass
@@ -100,19 +102,50 @@ class dataset(object):
         #self.surface_rho += noises
 
         # now generate some fires
-        self.fires = burnIt_idea1(self)
+        self.fires = burnIt_idea1(self, seeds=3)
         self.fire_locs = np.where(self.fires)
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         # Now run mixture model for spectral response to fire
         dob = 10
         self.surface_rho = spectral_fire_model(self.surface_rho, dob, self.timesteps,
                                                 self.fire_locs, ash_rho)
 
+    def surface_refl_to_tif(self):
+        """
+        save the dataset to a file 
+        save the truth BA data as well...
+        """
+        import gdal
+        filenames = ["s_refl.%03i.tif" % doy for doy in xrange(self.timesteps)]
+        # first output   
+        outdriver = gdal.GetDriverByName("GTiff")
+        # loop over dates...
+        for doy in xrange(self.timesteps):
+            outdata   = outdriver.Create(str(filenames[doy]), 
+                                     self.xSize, self.ySize, 
+                                     self.bands, gdal.GDT_Float32,
+                                     ['COMPRESS=LZW'])
+            # write out each band of the surface refl
+            for band in xrange(self.surface_rho[doy].shape[0]):
+                outdata.GetRasterBand(band+1).WriteArray(self.surface_rho[doy][band])
+        return None
 
-####################################
-####################################
-####################################
 
+    def BA_to_tif(self):
+        """
+        save the truth BA data 
+        """
+        import gdal
+        filenames = ["BA.%03i.tif" % doy for doy in xrange(self.timesteps)]
+        # first output   
+        outdriver = gdal.GetDriverByName("GTiff")
+        # loop over dates...
+        for doy in xrange(self.timesteps):
+            outdata   = outdriver.Create(str(filenames[doy]), 
+                                     self.xSize, self.ySize, 
+                                     1, gdal.GDT_Byte, ['COMPRESS=LZW'])
+            outdata.GetRasterBand(1).WriteArray(self.fires[doy])
+        return None
 
 
 # lets just start of simple and generate a fire in the middle on a choosen dataset
@@ -164,7 +197,7 @@ class aFire():
         # run the fire
         self._spread(self.DOB[0], self.x[0], self.y[0], decay=1)
 
-    def _spread(self, DOB, x,y, decay):
+    def _spread(self, DOB, x,y, decay=20):
         """
 
         The key function...
@@ -221,7 +254,7 @@ def burnIt_idea1(dataset, seeds=10, temporal=True):
         this_fire = aFire(burns[f][0], burns[f][1][0], burns[f][1][1])
         fires.append(this_fire)
     # now put the fires into a boolean mask...
-    bools = np.zeros((timesteps, size, size)).astype(np.bool)
+    bools = np.zeros((timesteps, size, size)).astype(np.int)
     for fire in fires:
         # make sure placing in right place!
         for burnday in zip(fire.DOB, fire.x, fire.y):
@@ -229,7 +262,7 @@ def burnIt_idea1(dataset, seeds=10, temporal=True):
             x = burnday[1]
             y = burnday[2]
             try:
-                bools[day,x,y] = True
+                bools[day,x,y] = day
             except:
                 pass
     # so bools provides the DOB for each pixel now...
@@ -267,6 +300,8 @@ def main():
     ds = dataset()
     ds.model_fires()
     import pdb; pdb.set_trace()
+    ds.BA_to_tif()
+    ds.surface_refl_to_tif()
 
 if __name__ == "__main__":
     main()    
