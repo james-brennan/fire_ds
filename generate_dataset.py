@@ -20,16 +20,12 @@ python generate_test_data.py
 
 # for each location need to add the fire in
 #now need
-#import noise
+import noise
 from scipy.signal import convolve
 import scipy.interpolate
 import sys
 import numpy as np
 sys.setrecursionlimit(10000)
-
-
-
-
 
 
 class params(object):
@@ -47,7 +43,7 @@ class experiment(params):
 
 
 class dataset(object):
-    def __init__(self, outname='nothing.tif',timesteps=100, bands=13, sizex=800, sizey=800, spatial_res=1 ):
+    def __init__(self, outname='nothing.tif',timesteps=100, bands=13, sizex=100, sizey=100, spatial_res=1 ):
         self.xSize = sizex
         self.ySize = sizey
         self.timesteps = timesteps
@@ -76,10 +72,46 @@ class dataset(object):
         run after fires has been modelled into scene...
 
         """
-        if self.modelled_fire:
-            # fire has been added
-            # hmmm how to do this?
-            pass
+        """
+
+        idea for now is to re-use perlin noise generator
+        With a threshold for how many clouds there should be:
+            -- could be semi-seasonal + random element
+
+        """
+        # model of cloud cover across timesteps
+        #       maximum seasonal component 80%          random weather
+        cloud =0.4* np.sin(np.linspace(0,np.pi,self.timesteps)) + np.random.normal(0.2, 0.1, self.timesteps)
+        # make sure max is one
+        cloud[cloud>1]=1
+        # generate some new perlin noise
+        # for whole dataset!
+        # try and apply day by day to save memory though
+
+        the_noise = make_noises(self.timesteps, self.xSize, time_multiple=2)
+        #import pdb; pdb.set_trace()
+        # idea is to threshold the perlin noise by the percentile of cloud_cover
+        # this produces a binary mask that should produce realistic looking
+        # clouds
+        percentiles = np.array([np.percentile(no, cl*100) for no, cl in zip(the_noise, cloud)])
+
+        # now threshold the noise below these values
+        for day in xrange(self.timesteps):
+            # mask in cloud
+            the_noise[day][the_noise[day] < percentiles[day]] = True # is cloud
+            # make into a binary
+            the_noise[day][the_noise[day] != True] = False
+        # convert all to a boolean
+        the_noise = the_noise.astype(np.bool)
+
+        # apply cloud mask to data
+        self.cloud_mask = ~the_noise
+        self.surface_rho = (self.surface_rho[:].T*self.cloud_mask[:,None].T).T
+        # make it into a masked array for clarity
+        #import pdb; pdb.set_trace()
+        self.surface_rho = np.ma.array(self.surface_rho, mask=self.surface_rho==0)
+        return 0
+
 
     def model_fires(self, burned_pixels_percent=0):
         """
@@ -100,16 +132,17 @@ class dataset(object):
 
         # first fill the dataset with just normal leaf reflectance across all timesteps
         self.surface_rho = (self.surface_rho[:].T*vegetation_rho[None, :].T).T
-
-        # ADD NOISE
-        # created spatio-temporal noise patterns
-        #noises = make_noises(timesteps,bands,size)
-
-        # scale down from (-1,1) to a smaller range ...
-        #noises *= 0.1
+        # now generate the noise
+        noises = make_noises(self.timesteps, self.xSize)
+        noises *= 0.1
 
         # now add to the surface reflectance
-        #self.surface_rho += noises
+        #import pdb; pdb.set_trace()
+        # need same dimensions
+        noises = np.tile(noises, (self.bands,1,1,1),)
+        # switch dimensions
+        noises = np.swapaxes(noises, 0,1)
+        self.surface_rho += noises
 
         # now generate some fires
         if burned_pixels_percent == 0:
@@ -120,75 +153,19 @@ class dataset(object):
             # invert simulations to match with a pixel %...
             # 1. calculate total pixels...
             self.pixels = self.xSize * self.ySize
-            #import pdb; pdb.set_trace()
-            result = self._optimize_BA(burned_pixels_percent, self.pixels)
-            import pdb; pdb.set_trace()
+            # how many burnt?
+            to_burn = ((burned_pixels_percent)/100.0) * self.pixels
+            seeds = 5.0
+            # per seed...
+            to_burn /= seeds
+            # call the fire routine
+            self.fires = burnIt_idea1(self, seeds=5, numPixels=to_burn)
         self.fire_locs = np.where(self.fires)
         #import pdb; pdb.set_trace()
         # Now run mixture model for spectral response to fire
         dob = 10
         self.surface_rho = spectral_fire_model(self.surface_rho, dob, self.timesteps,
                                                 self.fire_locs, ash_rho)
-
-    def _optimize_BA(self, percentage, total_pixels):
-        """
-        Function used to optimize the number of burned
-        pixels to match a chosen percentage
-        """
-        import scipy.optimize
-        initial_guess = np.array((percentage/5, percentage/2, 0.001))
-        args = (percentage, total_pixels)
-        #import pdb; pdb.set_trace()
-        minimizer_kwargs = {"args": args}
-        bounds = np.array(((1,50), (0.1, 50), (1e-12, 1e-1)))
-        lower = np.array((1,0.1,1e-12))
-        upper = np.array((50,50,1e-1))
-        #result = scipy.optimize.anneal(self.__Burnpix_mismatch,feps=1,maxiter=1,maxaccept=1,maxeval=1,lower=lower, upper=upper,
-        #                                x0=initial_guess, args=args)
-        result = scipy.optimize.minimize(self.__Burnpix_mismatch,tol=1, options={'maxiter':10, 'maxfun':10}, bounds=bounds, method='L-BFGS-B',
-                                        x0=initial_guess, args=args)
-        print 'done!'
-        return result
-
-    def __Burnpix_mismatch(self, state, percentage, total_pixels):
-            # 1. do ba
-            """
-            NOTE: CURRENT LIMITATION OF SCIPY OPTIMIZE IS THAT IT REQUIRES
-            THE FIRST ARGUMENT TO minimize() TO BE THE PARAMETERS. WITHIN
-            A CLASS THIS DOES NOT WORK -- IT DEFAULTS TO SELF...
-            THEREFORE WE NEED TO SWITCH THESE ROUND... EURGH
-            """
-            seeds = state[0]
-            decay = state[1]
-            # bump away from zero
-            if seeds == 0:
-                seeds=1
-            if decay==0:
-                decay=1
-            #import pdb; pdb.set_trace()
-            ba = burnIt_idea1(self, seeds=int(seeds), decay=decay)
-            bPixels = len(np.where(ba)[2])
-            #import pdb; pdb.set_trace()
-            percent_off = np.sqrt(((float(bPixels)/total_pixels)*100-percentage)**2)
-            #print bPixels, percent_off
-            print seeds, decay, percent_off
-            """
-            NOTE: need to unfortunately save the ba pattern out
-            to the class each time otherwise its' lost...
-
-            PLUS THIS DOESN'T WORK YET SO ONLY REPLACE IF SCORE IS BETTER
-            THAN PREVIOUS EURGH...
-            """
-            if (self.fires == None):
-                self.fires = ba
-                self.bPixels = bPixels
-            previous_perf = np.sqrt(((float(self.bPixels)/total_pixels)*100-percentage)**2)
-            #import pdb; pdb.set_trace()
-            if not (self.fires == None) and percent_off <= previous_perf:
-                self.fires = ba
-                print seeds, decay, percent_off, '*'
-            return percent_off**2
-
 
     def surface_refl_to_tif(self):
         """
@@ -210,6 +187,24 @@ class dataset(object):
                 outdata.GetRasterBand(band+1).WriteArray(self.surface_rho[doy][band])
         return None
 
+    def _save_to_gif(self):
+        """
+        make an animated gif of the surface refl
+        """
+        import matplotlib.pyplot as plt
+        filenames = []
+        for day in xrange(self.timesteps):
+            plt.imshow(self.surface_rho[day, 10], interpolation='nearest', cmap='jet')
+            plt.colorbar()
+            fname = "rho_%03i.png" % day
+            plt.title(fname)
+            filenames.append(fname)
+            plt.tight_layout()
+            plt.savefig(fname)
+            plt.close()
+        # also run terminal command to make gif...
+        import os
+        os.system('convert -delay 20 -loop 0 *.png animation.gif')
 
     def BA_to_tif(self):
         """
@@ -257,27 +252,25 @@ def generate_spectra():
 #seems to only work in a loop atm!!!
 # do same noise across bands but varying in space and time -- use 3d noise for now
 
-def make_noises(timesteps, bands, size):
-    noises = np.zeros((timesteps, bands, size,size))
+def make_noises(timesteps, size, time_multiple=1):
+    noises = np.zeros((timesteps, size,size))
     for t,z in enumerate(np.linspace(0,1,timesteps)):
         #print t
         for i,x in enumerate(np.linspace(0,1,size)):
             for j,y in enumerate(np.linspace(0,1,size)):
                 #print x,y
                 # increasign the number of octaves increases the noise...
-                noises[t,:, j,i] = noise.snoise3(x,y,z, octaves=5) # not sure what octave to pick...
+                noises[t, j,i] = noise.snoise3(x,y,time_multiple*z, octaves=5) # not sure what octave to pick...
     return noises
 
 
-class aFire():
-    def __init__(self, DOB, x,y, decay=1, decay_rate=0.001):
+class aFire(object):
+    def __init__(self, DOB, x,y, numPixels=1000):
         self.x = [x]
         self.y = [y]
         self.DOB = [DOB]
         # run the fire
-        self.decay = decay
-        self.decay_rate = decay_rate
-        self._spread2(self.DOB[0], self.x[0], self.y[0], decay=self.decay, decay_rate=self.decay_rate)
+        self._spread3(self.DOB[0], self.x[0], self.y[0], numPixels=numPixels)
 
     def _spread(self, DOB, x,y, decay):
         """
@@ -368,8 +361,63 @@ class aFire():
         else:
             return None
 
+    def _spread3(self, DOB, x,y, numPixels=500, count=0):
+        """
 
-def burnIt_idea1(dataset, seeds=10, decay=1,decay_rate=0.01, temporal=True):
+        The key function...
+        this spreads the fire with some randomness
+        to fill a certain number of pixels as supplied...
+        """
+        #import pdb; pdb.set_trace()
+        if numPixels - count >= 0:
+            # 1. choose a direction to expand
+            """
+            Key part of algorithm:
+                Here we are choosing a surrounding box cell to move to
+                    (or stay put).
+                the various permuations of +x and +y
+                are:
+                 x    y
+                 ======
+                 0    0  -- current location
+                 1    1
+                -1   -1
+                 1   -1
+                -1    1
+                -1    0
+                 1    0
+                 0    1
+                 0    -1
+            """
+            movements = np.array([[0,0],[1,1], [-1,-1],
+                                  [1,-1],[-1,1],[-1,0],
+                                  [1,0],[0,1], [0,-1]] )
+
+            choice = np.random.choice([0,1,2,3,4,5,6,7,8])
+            if choice > 0:
+                #import pdb; pdb.set_trace()
+                dx, dy = movements[choice]
+                count += 1
+                # add this location to the store in the class..
+                self.x.append(x+dx)
+                self.y.append(y+dy)
+                #print choice, x+dx, y+dy, decay
+                #print decay
+                self.DOB.append(DOB+0.02) # spread more one day using a decimal increment for DOB
+                # recurse from this location...
+                #print decay
+                self._spread3(DOB+0.02, x+dx, y+dy, numPixels, count)
+            else:
+                # choice is 0...
+                # don't want to recurse out of function
+                # but want to try again?
+                self._spread3(DOB+0.02, x, y, numPixels, count)
+        else:
+            return None
+
+
+
+def burnIt_idea1(dataset, seeds=10, numPixels=1000, temporal=True):
     """
     Generate burned areas that occur around the date of burn choosen
     easy way is to create a 3d boolean mask where only TRUE are where
@@ -390,7 +438,7 @@ def burnIt_idea1(dataset, seeds=10, decay=1,decay_rate=0.01, temporal=True):
     # run the fire spread algorithm
     fires = []
     for f in xrange(seeds):
-        this_fire = aFire(burns[f][0], burns[f][1][0], burns[f][1][1], decay, decay_rate)
+        this_fire = aFire(burns[f][0], burns[f][1][0], burns[f][1][1], numPixels=numPixels)
         fires.append(this_fire)
     # now put the fires into a boolean mask...
     bools = np.zeros((timesteps, size, size)).astype(np.int)
@@ -468,9 +516,11 @@ def spectral_fire_model(surface_refl, dob, timesteps, fires_locations, ash_spect
 def main():
     ds = dataset()
     ds.model_fires(20)
-    import pdb; pdb.set_trace()
-    ds.BA_to_tif()
-    ds.surface_refl_to_tif()
+    #import pdb; pdb.set_trace()
+    #ds.model_cloud_cover()
+    ds._save_to_gif()
+    #ds.BA_to_tif()
+    #ds.surface_refl_to_tif()
 
 if __name__ == "__main__":
     main()
