@@ -71,3 +71,24 @@ def make_noises(timesteps, size, time_multiple=1, fix_seed=False):
                 noises[t, j,i] = noise.snoise3(x0+x, y0+y,
                                                 z0 + (time_multiple*z), octaves=12)
     return noises
+
+
+
+def make_landscape(size, p=0.55, n=4):
+    """
+    Based on landscape generation technique in Saura & Martinez-Millan (2000)
+
+    -- not exactly...
+    """
+    # 1. generate a percolation map
+    w = [1-p, p]
+
+    out = np.zeros((size,size))
+    n = 4
+    for i in xrange(n):
+        percos = np.random.binomial(1, p, size=(size,size))  #set randomly atm
+        percos = scipy.ndimage.filters.median_filter(percos, size/20.0).astype(np.int)
+        percos = scipy.ndimage.filters.median_filter(percos, size/20.0-i).astype(np.int)
+        out += percos
+
+    return out

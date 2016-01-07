@@ -17,7 +17,7 @@ import scipy.ndimage.filters
 
 
 from fire import aFire
-from utils import make_noises, generate_spectra
+from utils import make_noises, generate_spectra, make_landscape
 from spectral_model import spectral_fire_model, spectral_temporal_response
 import fire_testing
 
@@ -130,8 +130,21 @@ class dataset(object):
         mean_state = np.tile(mean_state, (self.bands,self.timesteps,1,1),)
         mean_state = np.swapaxes(mean_state, 0,1)
 
+        # alternative with more spatial features -- less like a cloud
+        land_cover = make_landscape(self.xSize)
+
+        # for each catergory in the land_cover assign a mean variation on
+        # the spectra
+        lc_spe_multiple = np.linspace(0.85, 1.15, len(np.unique(land_cover)))
+        # associate these values with land_cover
+        for i,j in enumerate(np.unique(land_cover)):
+            land_cover[np.where(land_cover==j)] = lc_spe_multiple[i]
+
+        import pdb; pdb.set_trace()
         # multiply this with spectra
-        self.surface_rho *= mean_state
+        lc_effect = np.tile(land_cover, (self.timesteps,self.bands,1,1),)
+        #mean_state = np.swapaxes(mean_state, 0,1)
+        self.surface_rho *= lc_effect
 
 
         # now generate temporal variability
