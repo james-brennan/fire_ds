@@ -14,20 +14,158 @@ import numpy as np
 sys.setrecursionlimit(10000)
 import scipy.ndimage.filters
 
+
+class fire(object):
+    def __init__(self, DOBs, xs,ys):
+        self.x = xs
+        self.y = ys
+        self.DOB = DOBs
+    def __repr__(self):
+        return "Fire starting on %i at (%i,%i)" % (self.DOB[0], self.x[0], self.y[0])
+
+    def make_ba_array(self,xSize, ySize):
+        arr = np.zeros((xSize, ySize))
+        arr[self.x,self.y] = self.DOB
+        # make this into a fire
+        return arr
+
+
 class aFire(object):
     def __init__(self, DOB, x,y, numPixels=1000):
         self.x = [x]
         self.y = [y]
         self.DOB = [DOB]
         # run the fire
-        self._spread3(self.DOB[0], self.x[0], self.y[0], numPixels=numPixels)
+        self._spread3_Von_Neumann_non_recurse(self.DOB[0], self.x[0], self.y[0], numPixels=numPixels)
 
-    def _spread3(self, DOB, x,y, numPixels=500, count=0):
+    def _spread3_Von_Neumann(self, DOB, x,y, numPixels=500, count=0):
         """
 
         The key function...
         this spreads the fire with some randomness
         to fill a certain number of pixels as supplied...
+
+        -- Contains Von_Neumann spreading: spreads to 4 neighbours
+            eg no diagonals
+
+        """
+        #import pdb; pdb.set_trace()
+        if numPixels - count >= 0:
+            # 1. choose a direction to expand
+            """
+            Key part of algorithm:
+                Here we are choosing a surrounding box cell to move to
+                    (or stay put).
+                the various permuations of +x and +y
+                are:
+                 x    y
+                 ======
+                 0    0  -- current location
+                -1    0
+                 1    0
+                 0    1
+                 0    -1
+            """
+            movements = np.array((  (-1,0),
+                            (0,-1),          (0, 1),
+                                    (1,0)  ))
+
+            choice = np.random.choice([0,1,2,3])
+            #import pdb; pdb.set_trace()
+            dx, dy = movements[choice]
+            # check if previously visited:
+            #import pdb; pdb.set_trace()
+            if not (x+dx,y+dy) in zip(self.x, self.y):
+                #print True
+                count += 1
+                # add this location to the store in the class..
+                self.x.append(x+dx)
+                self.y.append(y+dy)
+                #print choice, x+dx, y+dy, decay
+                #print decay
+                self.DOB.append(DOB+0.02) # spread more one day using a decimal increment for DOB
+                # recurse from this location...
+                #print decay
+                self._spread3_Von_Neumann(DOB+0.02, x+dx, y+dy, numPixels, count)
+            else:
+                # already visited this cell during this fire...
+                # don't want to re-burn it...
+                # so restart...
+                print False
+                self._spread3_Von_Neumann(DOB+0.02, x, y, numPixels, count)
+        else:
+            return None
+
+
+    def _spread3_Von_Neumann_non_recurse(self, DOB, x0,y0, numPixels=500, count=0):
+        """
+
+        this spreads the fire with some randomness
+        to fill a certain number of pixels as supplied...
+
+        -- Contains Von_Neumann spreading: spreads to 4 neighbours
+            eg no diagonals
+
+        Non recursive
+
+        """
+        # setup
+        pCount = 0
+        #import pdb; pdb.set_trace()
+        # add initial fire to save
+        self.DOB.append(DOB)
+        self.x.append(x0)
+        self.y.append(y0)
+        time_delta = 0
+        movements = np.array((      (-1,0),
+                            (0,-1),          (0, 1),
+                                    (1,0)  ))
+
+        # set x and y
+        x = x0; y = y0
+        fails = 0
+        while (numPixels - pCount >= 0) and (fails < 100):
+            # 1. choose a direction to expand
+            choice = np.random.choice([0,1,2,3])
+            #import pdb; pdb.set_trace()
+            dx, dy = movements[choice]
+            # check if previously visited:
+            #import pdb; pdb.set_trace()
+            if not (x+dx,y+dy) in zip(self.x, self.y):
+                #print True
+                pCount += 1
+                time_delta += 0.02
+                # add this location to the store in the class..
+                self.x.append(x+dx)
+                self.y.append(y+dy)
+                #print choice, x+dx, y+dy, pCount
+                #print decay
+                self.DOB.append(DOB+time_delta) # spread more one day using a decimal increment for DOB
+                #
+                # update x and y
+                x = x+dx; y = y+dy
+            else:
+                # already visited this cell during this fire...
+                # don't want to re-burn it...
+                # so restart...
+                pass
+                # to prevent infinite recursion when the alg gets stuck
+                # add to fails
+                fails += 1
+                print fails, fails < 10
+        else:
+            return None
+
+
+    def _spread3_Moore(self, DOB, x,y, numPixels=500, count=0):
+        """
+
+        The key function...
+        this spreads the fire with some randomness
+        to fill a certain number of pixels as supplied...
+
+        -- Contains Moore spreading: spreads to all 8 neighbours eg diagonals too
+
         """
         #import pdb; pdb.set_trace()
         if numPixels - count >= 0:

@@ -71,13 +71,15 @@ class dataset(object):
 
         """
         # model of cloud cover across timesteps
-        #       maximum seasonal component 80%          random weather
+        #       maximum seasonal component 20%          random weather
         cloud = (0.2 * np.sin(np.linspace(0,np.pi,self.timesteps)) +
                     np.random.normal(0.2, 0.1, self.timesteps))
         # make sure max is one
         cloud[cloud > 1] = 1
+        # and min is 0
+        cloud[cloud < 0] = 0
         # generate some new perlin noise
-        the_noise = make_noises(self.timesteps, self.xSize, time_multiple=20)
+        the_noise = make_noises(self.timesteps, self.xSize, time_multiple=200)
         """
          idea is to threshold the perlin noise by the percentile of cloud_cover
          this produces a binary mask that should produce realistic looking
@@ -103,6 +105,46 @@ class dataset(object):
         return 0
 
 
+    def model_background_state(self):
+        """
+        Make some sort of realistic dynamics for the background
+        state of reflectance
+        """
+        if self.surface_rho == None:
+            self.make_stack()
+        # load spectra
+        vegetation_rho, ash_rho = generate_spectra()
+        # select some bands...
+        vegetation_rho = vegetation_rho[::25]
+        ash_rho = ash_rho[::25]
+        # keep these for later...
+        self.ash_rho = ash_rho
+        self.vegetation_rho = vegetation_rho
+
+        # first fill the dataset with just normal leaf reflectance across all timesteps
+        self.surface_rho = (self.surface_rho[:].T*vegetation_rho[None, :].T).T
+
+        # now make a mean state...
+        mean_state = make_noises(1, self.xSize)
+        mean_state *= 0.3
+        mean_state = np.tile(mean_state, (self.bands,self.timesteps,1,1),)
+        mean_state = np.swapaxes(mean_state, 0,1)
+
+        # multiply this with spectra
+        self.surface_rho *= mean_state
+
+
+        # now generate temporal variability
+        temporal = make_noises(self.timesteps, self.xSize)
+        temporal *= 0.05
+
+        # now add to the surface reflectance
+        # need same dimensions
+        temporal = np.tile(temporal, (self.bands,1,1,1),)
+        # switch dimensions
+        temporal = np.swapaxes(temporal, 0,1)
+        self.surface_rho += temporal
+
     def model_fires(self, burned_pixels_percent=0):
         """
 
@@ -112,28 +154,6 @@ class dataset(object):
             as burned. Uses scipy.optimize --
                 NOTE: is quite slow...
         """
-        if self.surface_rho == None:
-            self.make_stack()
-        # load spectra
-        vegetation_rho, ash_rho = generate_spectra()
-        # select some bands...
-        vegetation_rho = vegetation_rho[::25]
-        ash_rho = ash_rho[::25]
-
-        # first fill the dataset with just normal leaf reflectance across all timesteps
-        self.surface_rho = (self.surface_rho[:].T*vegetation_rho[None, :].T).T
-        # now generate the noise
-        noises = make_noises(self.timesteps, self.xSize)
-        noises *= 0.1
-
-        # now add to the surface reflectance
-        #import pdb; pdb.set_trace()
-        # need same dimensions
-        noises = np.tile(noises, (self.bands,1,1,1),)
-        # switch dimensions
-        noises = np.swapaxes(noises, 0,1)
-        self.surface_rho += noises
-
         # now generate some fires
         if burned_pixels_percent == 0:
             # just model some fires...
@@ -152,21 +172,19 @@ class dataset(object):
             # OLD ROUTINE
             #self.fires = burnIt_idea1(self, seeds=5, numPixels=to_burn)
             # try new method
-            size=100
-            f = fire_testing.fire(size=size)
+            f = fire_testing.fire(size=self.xSize)
             #import pdb; pdb.set_trace()
             f = np.array(f)
             #burn_map = np.zeros((size, size))
             #burn_map[f.T[1].astype(int), f.T[2].astype(int)] = f.T[0]
             self.fire_locs = f.T #np.where(self.fires)
 
-
-        self.fire_locs = f.T #np.where(self.fires)
+        #self.fire_locs = f.T #np.where(self.fires)
         #import pdb; pdb.set_trace()
         # Now run mixture model for spectral response to fire
         #dob = 10
         self.surface_rho = spectral_fire_model(self.surface_rho, self.timesteps,
-                                                self.fire_locs, ash_rho)
+                                                self.fire_locs, self.ash_rho)
 
     def surface_refl_to_tif(self):
         """
@@ -179,13 +197,29 @@ class dataset(object):
         outdriver = gdal.GetDriverByName("GTiff")
         # loop over dates...
         for doy in xrange(self.timesteps):
-            outdata   = outdriver.Create(str(filenames[doy]),
+            outdata = outdriver.Create(str(filenames[doy]),
                                      self.xSize, self.ySize,
                                      self.bands, gdal.GDT_Float32,
                                      ['COMPRESS=LZW'])
             # write out each band of the surface refl
             for band in xrange(self.surface_rho[doy].shape[0]):
                 outdata.GetRasterBand(band+1).WriteArray(self.surface_rho[doy][band])
+        return None
+
+    def BA_to_tif(self):
+        """
+        save the truth BA data
+        """
+        import gdal
+        filenames = ["BA.%03i.tif" % doy for doy in xrange(self.timesteps)]
+        # first output
+        outdriver = gdal.GetDriverByName("GTiff")
+        # loop over dates...
+        for doy in xrange(self.timesteps):
+            outdata   = outdriver.Create(str(filenames[doy]),
+                                     self.xSize, self.ySize,
+                                     1, gdal.GDT_Byte, ['COMPRESS=LZW'])
+            outdata.GetRasterBand(1).WriteArray(self.fires[doy])
         return None
 
     def _save_to_gif(self):
@@ -206,90 +240,3 @@ class dataset(object):
         # also run terminal command to make gif...
         import os
         os.system('convert -delay 20 -loop 0 *.png animation.gif')
-
-    def BA_to_tif(self):
-        """
-        save the truth BA data
-        """
-        import gdal
-        filenames = ["BA.%03i.tif" % doy for doy in xrange(self.timesteps)]
-        # first output
-        outdriver = gdal.GetDriverByName("GTiff")
-        # loop over dates...
-        for doy in xrange(self.timesteps):
-            outdata   = outdriver.Create(str(filenames[doy]),
-                                     self.xSize, self.ySize,
-                                     1, gdal.GDT_Byte, ['COMPRESS=LZW'])
-            outdata.GetRasterBand(1).WriteArray(self.fires[doy])
-        return None
-
-
-# lets just start of simple and generate a fire in the middle on a choosen dataset
-
-def burnIt_idea1(dataset, seeds=1, numPixels=1000, temporal=True):
-    """
-    Generate burned areas that occur around the date of burn choosen
-    easy way is to create a 3d boolean mask where only TRUE are where
-    burn is (on DOB)
-
-
-    This methods starts from a number of seeds and grows outwards randomly
-    to produce burned areas...
-    --- also has a temporal flag so that the burn spreads in time..
-    """
-    size=dataset.xSize
-    timesteps = dataset.timesteps
-    DOB = 10
-    burns = []
-    for i in xrange(seeds):
-        burns.append((DOB, np.random.uniform(0, size, 2).astype(int)))
-    # now for each of the seeds
-    # run the fire spread algorithm
-    fires = []
-    for f in xrange(seeds):
-        this_fire = aFire(burns[f][0], burns[f][1][0], burns[f][1][1], numPixels=numPixels)
-        fires.append(this_fire)
-    # now put the fires into a boolean mask...
-    bools = np.zeros((timesteps, size, size)).astype(np.int)
-    for fire in fires:
-        # make sure placing in right place!
-        for burnday in zip(fire.DOB, fire.x, fire.y):
-            day = burnday[0]
-            x = burnday[1]
-            y = burnday[2]
-            try:
-                bools[day,x,y] = day
-            except:
-                pass
-    # so bools provides the DOB for each pixel now...
-    """
-        NOTE: FOR NOW ALGORITHM REVISITS CELLS WHICH HAVE BEEN
-        BURNT ALREADY. THIS IS UNREALISTIC. SO FOR NOW JUST TAKE FIRST
-        OCCURENCE OF FIRE IN EACH PIXEL THROUGH TIME.
-    """
-    for x in xrange(size):
-        for y in xrange(size):
-            # take time stack...
-            timestack = bools[:, x,y].copy()
-            # if more than one fire occurs...
-            idx = np.nonzero(timestack)
-            #
-            #import pdb; pdb.set_trace()
-            if idx[0].shape[0] > 1:
-                # more than one fire...
-                # so set afters back to 0
-                #import pdb; pdb.set_trace()
-                timestack[idx][1:] =0
-                # make a mask...
-                mask = np.zeros_like(timestack)
-                mask[idx[0][0]]=1
-                # multiply mask by timestack
-                timestack *= mask
-                # make sure value is 1
-                #timestack[idx[0][0]]=1
-                # put the new timestack back
-                #print timestack
-                bools[:, x,y] = timestack
-    #import pdb; pdb.set_trace()
-    #print np.sum(bools, axis=0).max()
-    return bools

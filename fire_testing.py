@@ -9,7 +9,7 @@
 
 """
 import scipy.ndimage.filters
-from numba import jit
+import numpy as np
 
 class SeedError(Exception):
     pass
@@ -29,16 +29,16 @@ def fire(size=100, steps=100, max_size=900):
     neighbourhood = np.array(((-1,-1), (-1,0), (-1,1),
                     (0,-1),          (0, 1),
                     (1,-1),  (1,0),  (1,1)))
-    #neighbourhood = np.array(( (-1,0),
-    #                    (0,-1),          (0, 1),
-    #                            (1,0),  ))
+    neighbourhood = np.array(( (-1,0),
+                        (0,-1),          (0, 1),
+                                (1,0),  ))
     # do setup stuff
     #grid = np.zeros((xSize, ySize,)).astype(np.int)
     l0 = np.random.randint(0,2,size=(size,size)).astype(np.int)
     # do some smoothing on it to make it more realistic...
     #import pdb; pdb.set_trace()
     l0 = scipy.ndimage.filters.median_filter(l0, 5).astype(np.int)
-    l0 = scipy.ndimage.filters.median_filter(l0, 15).astype(np.int)
+    l0 = scipy.ndimage.filters.median_filter(l0, 5).astype(np.int)
     init = l0.copy()
     #import pdb; pdb.set_trace()
     #l0 = np.ones((size, size,)).astype(np.int)
@@ -68,7 +68,7 @@ def fire(size=100, steps=100, max_size=900):
     """
     fails = 0
     burnt_count = 0
-    doy = 0
+    doy = 10 # start at 10
     lt = l0.copy()
     for t in xrange(steps):
       if burnt_count < max_size:
@@ -117,20 +117,20 @@ def fire(size=100, steps=100, max_size=900):
           if fails > 20:
               # return what you'ev got
               print 'here'
-              #return zip(DOBS, xs, ys), init
+              return zip(DOBS, xs, ys)
               #raise SeedError("Seeding has failed...")
-    return zip(DOBS, xs, ys), init
+    return zip(DOBS, xs, ys)
 
-
-size=200
-f, init = fire(size=size)
-f = np.array(f)
-
-burn_map = np.zeros((size, size))
-burn_map[f.T[1].astype(int), f.T[2].astype(int)] = f.T[0]
-
-plt.figure()
-plt.subplot(121)
-plt.imshow(burn_map)
-plt.subplot(122)
-plt.imshow(init)
+#
+# size=200
+# f, init = fire(size=size)
+# f = np.array(f)
+#
+# burn_map = np.zeros((size, size))
+# burn_map[f.T[1].astype(int), f.T[2].astype(int)] = f.T[0]
+#
+# plt.figure()
+# plt.subplot(121)
+# plt.imshow(burn_map)
+# plt.subplot(122)
+# plt.imshow(init)
