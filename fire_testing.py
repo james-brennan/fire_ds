@@ -15,7 +15,7 @@ class SeedError(Exception):
     pass
 
 
-def fire(size=100, steps=100, max_size=900):
+def fire(size=100, dob0=10, steps=100, max_size=900):
 
     """
      1. setup
@@ -68,7 +68,7 @@ def fire(size=100, steps=100, max_size=900):
     """
     fails = 0
     burnt_count = 0
-    doy = 10 # start at 10
+    doy = dob0 # start at 10
     lt = l0.copy()
     for t in xrange(steps):
       if burnt_count < max_size:

@@ -140,7 +140,7 @@ class dataset(object):
         for i,j in enumerate(np.unique(land_cover)):
             land_cover[np.where(land_cover==j)] = lc_spe_multiple[i]
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         # multiply this with spectra
         lc_effect = np.tile(land_cover, (self.timesteps,self.bands,1,1),)
         #mean_state = np.swapaxes(mean_state, 0,1)
@@ -149,7 +149,7 @@ class dataset(object):
 
         # now generate temporal variability
         temporal = make_noises(self.timesteps, self.xSize)
-        temporal *= 0.05
+        temporal *= 0.2
 
         # now add to the surface reflectance
         # need same dimensions
@@ -168,6 +168,7 @@ class dataset(object):
                 NOTE: is quite slow...
         """
         # now generate some fires
+        self.fire_locs = []
         if burned_pixels_percent == 0:
             # just model some fires...
             import pdb; pdb.set_trace()
@@ -185,19 +186,27 @@ class dataset(object):
             # OLD ROUTINE
             #self.fires = burnIt_idea1(self, seeds=5, numPixels=to_burn)
             # try new method
-            f = fire_testing.fire(size=self.xSize)
-            #import pdb; pdb.set_trace()
-            f = np.array(f)
-            #burn_map = np.zeros((size, size))
-            #burn_map[f.T[1].astype(int), f.T[2].astype(int)] = f.T[0]
-            self.fire_locs = f.T #np.where(self.fires)
-
-        #self.fire_locs = f.T #np.where(self.fires)
-        #import pdb; pdb.set_trace()
-        # Now run mixture model for spectral response to fire
-        #dob = 10
-        self.surface_rho = spectral_fire_model(self.surface_rho, self.timesteps,
-                                                self.fire_locs, self.ash_rho)
+            numFires=5
+            for i in xrange(numFires):
+                # choose a date at random after initial possible
+                # burn date
+                spark_date = 15 + np.random.randint(0,15)
+                f = fire_testing.fire(size=self.xSize)
+                #import pdb; pdb.set_trace()
+                f = np.array(f)
+                if len(f) ==0:
+                    continue
+                #burn_map = np.zeros((size, size))
+                #burn_map[f.T[1].astype(int), f.T[2].astype(int)] = f.T[0]
+                self.fire_locs.append( f.T ) #np.where(self.fires)
+                #import pdb; pdb.set_trace()
+                #self.fire_locs = np.array(self.fire_locs)
+                #import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
+                # Now run mixture model for spectral response to fire
+                #dob = 10
+                self.surface_rho = spectral_fire_model(self.surface_rho, self.timesteps,
+                                                        f.T, self.ash_rho)
 
     def surface_refl_to_tif(self):
         """
@@ -242,7 +251,7 @@ class dataset(object):
         import matplotlib.pyplot as plt
         filenames = []
         for day in xrange(self.timesteps):
-            plt.imshow(self.surface_rho[day, 10], interpolation='nearest', cmap='jet')
+            plt.imshow(self.surface_rho[day, 10], interpolation='nearest', cmap='Greys_r')
             plt.colorbar()
             fname = "rho_%03i.png" % day
             plt.title(fname)
