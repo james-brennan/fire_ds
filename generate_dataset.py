@@ -37,8 +37,6 @@ def main():
     ds = dataset()
     ds.model_background_state()
     ds.model_fires(30)
-    #import pdb; pdb.set_trace()
-    import pdb; pdb.set_trace()
     ds.model_cloud_cover()
     ds._save_to_gif()
     #ds.BA_to_tif()

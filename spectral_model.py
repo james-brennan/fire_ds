@@ -20,7 +20,7 @@ def spectral_temporal_response(num_days=20):
     return vegetation, char_ash
 
 
-def spectral_fire_model(surface_refl, timesteps, fires_locations, ash_spectrum):
+def spectral_fire_model(surface_refl, timesteps, fire_i, ash_spectrum):
     """
     Parameters
     ----------
@@ -28,16 +28,16 @@ def spectral_fire_model(surface_refl, timesteps, fires_locations, ash_spectrum):
         Array holding surface reflectance into which fire is modelled
     timesteps: int
         Number of timesteps
-    fires_locations: array (dob, x, y)
+    fire_i: fire class
         Fire locations. Date of burn, x and y location
     ash_spectrum: Array
         spectral end member for ash
     """
-    for i in xrange(len(fires_locations[0])):
+    for i in xrange(len(fire_i.DOB)):
         #
-        dob = int(fires_locations[0][i])
-        x =  fires_locations[1][i]
-        y =  fires_locations[2][i]
+        dob = int(fire_i.DOB[i])
+        x =  fire_i.x[i]
+        y =  fire_i.y[i]
         spectral_response_weights = spectral_temporal_response(num_days=50)
         # do mixture model
         if not (dob+50 > timesteps):

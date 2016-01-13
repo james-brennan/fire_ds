@@ -21,7 +21,7 @@ class fire(object):
         self.y = ys
         self.DOB = DOBs
     def __repr__(self):
-        return "Fire starting on %i at (%i,%i)" % (self.DOB[0], self.x[0], self.y[0])
+        return "Fire starting on day %i at (%i,%i)" % (self.DOB[0], self.x[0], self.y[0])
 
     def make_ba_array(self,xSize, ySize):
         arr = np.zeros((xSize, ySize))
